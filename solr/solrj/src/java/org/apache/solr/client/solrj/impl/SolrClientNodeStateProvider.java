@@ -148,7 +148,8 @@ public class SolrClientNodeStateProvider implements NodeStateProvider, MapWriter
 
   @Override
   public Map<String, Map<String, List<ReplicaInfo>>> getReplicaInfo(String node, Collection<String> keys) {
-    Map<String, Map<String, List<ReplicaInfo>>> result = nodeVsCollectionVsShardVsReplicaInfo.computeIfAbsent(node, o -> new HashMap<String, Map<String, List<ReplicaInfo>>>());
+    nodeVsCollectionVsShardVsReplicaInfo.putIfAbsent(node, new HashMap<String, Map<String, List<ReplicaInfo>>>());
+    Map<String, Map<String, List<ReplicaInfo>>> result = nodeVsCollectionVsShardVsReplicaInfo.get(node);
     if (!keys.isEmpty()) {
       Map<String, Pair<String, ReplicaInfo>> metricsKeyVsTagReplica = new HashMap<>();
       Row.forEachReplica(result, r -> {

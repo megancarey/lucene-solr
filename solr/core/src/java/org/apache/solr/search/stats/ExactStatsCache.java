@@ -128,8 +128,9 @@ public class ExactStatsCache extends StatsCache {
   }
 
   protected void addToPerShardColStats(SolrQueryRequest req, String shard, Map<String,CollectionStats> colStats) {
+    req.getContext().putIfAbsent(PER_SHARD_COL_STATS, new HashMap<Object,Object>());
     @SuppressWarnings({"unchecked"})
-    Map<String,Map<String,CollectionStats>> perShardColStats = (Map<String,Map<String,CollectionStats>>) req.getContext().computeIfAbsent(PER_SHARD_COL_STATS, o -> new HashMap<Object,Object>());
+    Map<String,Map<String,CollectionStats>> perShardColStats = (Map<String,Map<String,CollectionStats>>) req.getContext().get(PER_SHARD_COL_STATS);
     perShardColStats.put(shard, colStats);
   }
 
@@ -144,8 +145,9 @@ public class ExactStatsCache extends StatsCache {
   protected void addToPerShardTermStats(SolrQueryRequest req, String shard, String termStatsString) {
     Map<String,TermStats> termStats = StatsUtil.termStatsMapFromString(termStatsString);
     if (termStats != null) {
+      req.getContext().putIfAbsent(PER_SHARD_TERM_STATS, new HashMap<Object,Object>());
       @SuppressWarnings({"unchecked"})
-      Map<String,Map<String,TermStats>> perShardTermStats = (Map<String,Map<String,TermStats>>) req.getContext().computeIfAbsent(PER_SHARD_TERM_STATS, o -> new HashMap<Object,Object>());
+      Map<String,Map<String,TermStats>> perShardTermStats = (Map<String,Map<String,TermStats>>) req.getContext().get(PER_SHARD_TERM_STATS);
       perShardTermStats.put(shard, termStats);
     }
   }
@@ -316,14 +318,16 @@ public class ExactStatsCache extends StatsCache {
 
   protected void addToGlobalColStats(SolrQueryRequest req,
                                      Entry<String,CollectionStats> e) {
+    req.getContext().putIfAbsent(CURRENT_GLOBAL_COL_STATS, new HashMap<Object,Object>());
     @SuppressWarnings({"unchecked"})
-    Map<String,CollectionStats> currentGlobalColStats = (Map<String,CollectionStats>) req.getContext().computeIfAbsent(CURRENT_GLOBAL_COL_STATS, o -> new HashMap<Object,Object>());
+    Map<String,CollectionStats> currentGlobalColStats = (Map<String,CollectionStats>) req.getContext().get(CURRENT_GLOBAL_COL_STATS);
     currentGlobalColStats.put(e.getKey(), e.getValue());
   }
 
   protected void addToGlobalTermStats(SolrQueryRequest req, Entry<String,TermStats> e) {
+    req.getContext().putIfAbsent(CURRENT_GLOBAL_TERM_STATS, new HashMap<Object,Object>());
     @SuppressWarnings({"unchecked"})
-    Map<String,TermStats> currentGlobalTermStats = (Map<String,TermStats>) req.getContext().computeIfAbsent(CURRENT_GLOBAL_TERM_STATS, o -> new HashMap<Object,Object>());
+    Map<String,TermStats> currentGlobalTermStats = (Map<String,TermStats>) req.getContext().get(CURRENT_GLOBAL_TERM_STATS);
     currentGlobalTermStats.put(e.getKey(), e.getValue());
   }
 

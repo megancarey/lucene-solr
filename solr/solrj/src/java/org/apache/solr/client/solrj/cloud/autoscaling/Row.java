@@ -294,8 +294,9 @@ public class Row implements MapWriter {
   }
 
   public void createCollShard(Pair<String, String> collShard) {
-    Map<String, List<ReplicaInfo>> shardInfo = collectionVsShardVsReplicas.computeIfAbsent(collShard.first(), o -> new HashMap<String, List<ReplicaInfo>>());
-    if (collShard.second() != null) shardInfo.computeIfAbsent(collShard.second(), o -> new ArrayList<ReplicaInfo>());
+    collectionVsShardVsReplicas.putIfAbsent(collShard.first(), new HashMap<String, List<ReplicaInfo>>());
+    Map<String, List<ReplicaInfo>> shardInfo = collectionVsShardVsReplicas.get(collShard.first());
+    if (collShard.second() != null) shardInfo.putIfAbsent(collShard.second(), new ArrayList<ReplicaInfo>());
   }
 
 

@@ -600,8 +600,9 @@ public class SimScenario implements AutoCloseable {
         req.setContentWriter(new RequestWriter.StringPayloadContentWriter(streamBody, "application/json"));
       }
       SolrResponse rsp = scenario.cluster.request(req);
+      scenario.context.putIfAbsent(RESPONSES_CTX_PROP, new ArrayList<SolrResponse>());
       @SuppressWarnings("unchecked")
-      List<SolrResponse> responses = (List<SolrResponse>) scenario.context.computeIfAbsent(RESPONSES_CTX_PROP, o -> new ArrayList<SolrResponse>());
+      List<SolrResponse> responses = (List<SolrResponse>) scenario.context.get(RESPONSES_CTX_PROP);
       responses.add(rsp);
     }
   }
@@ -724,12 +725,14 @@ public class SimScenario implements AutoCloseable {
       String[] afterActions = params.getParams(AutoScalingParams.AFTER_ACTION);
       if (beforeActions != null) {
         for (String beforeAction : beforeActions) {
-          ((List<String>)cfgMap.computeIfAbsent(AutoScalingParams.BEFORE_ACTION, o -> new ArrayList<String>())).add(beforeAction);
+          cfgMap.putIfAbsent(AutoScalingParams.BEFORE_ACTION, new ArrayList<String>());
+          ((List<String>)cfgMap.get(AutoScalingParams.BEFORE_ACTION)).add(beforeAction);
         }
       }
       if (afterActions != null) {
         for (String afterAction : afterActions) {
-          ((List<String>)cfgMap.computeIfAbsent(AutoScalingParams.AFTER_ACTION, o -> new ArrayList<String>())).add(afterAction);
+          cfgMap.putIfAbsent(AutoScalingParams.AFTER_ACTION, new ArrayList<String>());
+          ((List<String>)cfgMap.get(AutoScalingParams.AFTER_ACTION)).add(afterAction);
         }
       }
       String[] stages = params.required().getParams(AutoScalingParams.STAGE);
@@ -738,7 +741,8 @@ public class SimScenario implements AutoCloseable {
         for (String val : lst) {
           try {
             TriggerEventProcessorStage.valueOf(val);
-            ((List<String>)cfgMap.computeIfAbsent(AutoScalingParams.STAGE, o -> new ArrayList<String>())).add(val);
+            cfgMap.putIfAbsent(AutoScalingParams.STAGE, new ArrayList<String>());
+            ((List<String>)cfgMap.get(AutoScalingParams.STAGE)).add(val);
           } catch (IllegalArgumentException e) {
             throw new IOException("Invalid stage name '" + val + "'");
           }

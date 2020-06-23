@@ -343,8 +343,10 @@ public class SimNodeStateProvider implements NodeStateProvider {
     Map<String, Map<String, List<ReplicaInfo>>> res = new HashMap<String, Map<String, List<ReplicaInfo>>>();
     // TODO: probably needs special treatment for "metrics:solr.core..." tags
     for (ReplicaInfo r : replicas) {
-      Map<String, List<ReplicaInfo>> perCollection = res.computeIfAbsent(r.getCollection(), o -> new HashMap<String, List<ReplicaInfo>>());
-      List<ReplicaInfo> perShard = perCollection.computeIfAbsent(r.getShard(), o -> new ArrayList<ReplicaInfo>());
+      res.putIfAbsent(r.getCollection(), new HashMap<String, List<ReplicaInfo>>());
+      Map<String, List<ReplicaInfo>> perCollection = res.get(r.getCollection());
+      perCollection.putIfAbsent(r.getShard(), new ArrayList<ReplicaInfo>());
+      List<ReplicaInfo> perShard = perCollection.get(r.getShard());
       // XXX filter out some properties?
       perShard.add(r);
     }

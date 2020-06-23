@@ -100,10 +100,10 @@ public class TestFastJavabinDecoder extends SolrTestCaseJ4 {
           e.listenContainer(new LinkedHashMap<>(), e_ -> {
             Map rootMap = (Map) e_.ctx();
             if (e_.type() == DataEntry.Type.ENTRY_ITER) {
-              e_.listenContainer(rootMap.computeIfAbsent(e_.name(), o -> new ArrayList<Object>()),
+              e_.listenContainer(rootMap.putIfAbsent(e_.name(), new ArrayList<Object>()),
                   FastJavaBinDecoder.getEntryListener());
             } else if (e_.type() == DataEntry.Type.KEYVAL_ITER) {
-              e_.listenContainer(rootMap.computeIfAbsent(e_.name(), o -> new LinkedHashMap<Object,Object>()), e1 -> {
+              e_.listenContainer(rootMap.putIfAbsent(e_.name(), new LinkedHashMap<Object,Object>()), e1 -> {
                 Map<CharSequence,String> m1 = (Map<CharSequence,String>) e1.ctx();
                 if ("k1".equals(e1.name())) {
                   m1.put(e1.name(), e1.val().toString());

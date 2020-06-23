@@ -340,10 +340,12 @@ public class SimClusterStateProvider implements ClusterStateProvider {
         // DocCollection will be created later
         collectionsStatesRef.put(dc.getName(), new CachedCollectionRef(dc.getName(), dc.getZNodeVersion()));
         collProperties.computeIfAbsent(dc.getName(), name -> new ConcurrentHashMap<>()).putAll(dc.getProperties());
-        opDelays.computeIfAbsent(dc.getName(), o -> new HashMap<String,Long>()).putAll(defaultOpDelays);
+        opDelays.putIfAbsent(dc.getName(), new HashMap<String,Long>());
+        opDelays.get(dc.getName()).putAll(defaultOpDelays);
         dc.getSlices().forEach(s -> {
           sliceProperties.computeIfAbsent(dc.getName(), name -> new ConcurrentHashMap<>())
-              .computeIfAbsent(s.getName(), o -> new HashMap<String,Object>()).putAll(s.getProperties());
+              .putIfAbsent(s.getName(), new HashMap<String,Object>());
+          sliceProperties.get(dc.getName()).get(s.getName()).putAll(s.getProperties());
           Replica leader = s.getLeader();
           s.getReplicas().forEach(r -> {
             Map<String, Object> props = new HashMap<>(r.getProperties());
@@ -355,7 +357,8 @@ public class SimClusterStateProvider implements ClusterStateProvider {
               ri.getVariables().put("leader", "true");
             }
             if (liveNodes.get().contains(r.getNodeName())) {
-              nodeReplicaMap.computeIfAbsent(r.getNodeName(), o -> Collections.synchronizedList(new ArrayList<ReplicaInfo>())).add(ri);
+              nodeReplicaMap.putIfAbsent(r.getNodeName(), Collections.synchronizedList(new ArrayList<ReplicaInfo>()));
+              nodeReplicaMap.get(r.getNodeName()).add(ri);
               colShardReplicaMap.computeIfAbsent(ri.getCollection(), name -> new ConcurrentHashMap<>())
                   .computeIfAbsent(ri.getShard(), shard -> new ArrayList<>()).add(ri);
             } else {
@@ -403,8 +406,8 @@ public class SimClusterStateProvider implements ClusterStateProvider {
   }
 
   private ReplicaInfo getReplicaInfo(Replica r) {
-    final List<ReplicaInfo> list = nodeReplicaMap.computeIfAbsent
-      (r.getNodeName(), o -> Collections.synchronizedList(new ArrayList<ReplicaInfo>()));
+    nodeReplicaMap.putIfAbsent(r.getNodeName(), Collections.synchronizedList(new ArrayList<ReplicaInfo>()));
+    final List<ReplicaInfo> list = nodeReplicaMap.get(r.getNodeName());
     synchronized (list) {
       for (ReplicaInfo ri : list) {
         if (r.getCoreName().equals(ri.getCore()) && r.getName().equals(ri.getName())) {
@@ -425,7 +428,7 @@ public class SimClusterStateProvider implements ClusterStateProvider {
       throw new Exception("Node " + nodeId + " already exists");
     }
     createEphemeralLiveNode(nodeId);
-    nodeReplicaMap.computeIfAbsent(nodeId, o -> Collections.synchronizedList(new ArrayList<ReplicaInfo>()));
+    nodeReplicaMap.putIfAbsent(nodeId, Collections.synchronizedList(new ArrayList<ReplicaInfo>()));
     liveNodes.add(nodeId);
     updateOverseerLeader();
   }
@@ -516,7 +519,8 @@ public class SimClusterStateProvider implements ClusterStateProvider {
 
   // this method needs to be called under a lock
   private void setReplicaStates(String nodeId, Replica.State state, Set<String> changedCollections) {
-    List<ReplicaInfo> replicas = nodeReplicaMap.computeIfAbsent(nodeId, o -> Collections.synchronizedList(new ArrayList<ReplicaInfo>()));
+    nodeReplicaMap.putIfAbsent(nodeId, Collections.synchronizedList(new ArrayList<ReplicaInfo>()));
+    List<ReplicaInfo> replicas = nodeReplicaMap.get(nodeId);
     synchronized (replicas) {
       replicas.forEach(r -> {
         r.getVariables().put(ZkStateReader.STATE_PROP, state.toString());
@@ -687,7 +691,8 @@ public class SimClusterStateProvider implements ClusterStateProvider {
         replicaInfo.getVariables().put(Variable.coreidxsize,
             new AtomicDouble((Double)Type.CORE_IDX.convertVal(SimCloudManager.DEFAULT_IDX_SIZE_BYTES)));
       }
-      nodeReplicaMap.computeIfAbsent(nodeId, o -> Collections.synchronizedList(new ArrayList<ReplicaInfo>())).add(replicaInfo);
+      nodeReplicaMap.putIfAbsent(nodeId, Collections.synchronizedList(new ArrayList<ReplicaInfo>()));
+      nodeReplicaMap.get(nodeId).add(replicaInfo);
       colShardReplicaMap.computeIfAbsent(replicaInfo.getCollection(), c -> new ConcurrentHashMap<>())
           .computeIfAbsent(replicaInfo.getShard(), s -> new ArrayList<>())
           .add(replicaInfo);
@@ -737,8 +742,8 @@ public class SimClusterStateProvider implements ClusterStateProvider {
     
     lock.lockInterruptibly();
     try {
-      final List<ReplicaInfo> replicas = nodeReplicaMap.computeIfAbsent
-        (nodeId, o -> Collections.synchronizedList(new ArrayList<ReplicaInfo>()));
+      nodeReplicaMap.putIfAbsent(nodeId, Collections.synchronizedList(new ArrayList<ReplicaInfo>()));
+      final List<ReplicaInfo> replicas = nodeReplicaMap.get(nodeId);
       synchronized (replicas) {
         for (int i = 0; i < replicas.size(); i++) {
           if (collection.equals(replicas.get(i).getCollection()) && coreNodeName.equals(replicas.get(i).getName())) {
@@ -2281,7 +2286,12 @@ public class SimClusterStateProvider implements ClusterStateProvider {
     }
     // core_node_name is not unique across collections
     Map<String, Map<String, ReplicaInfo>> infoMap = new HashMap<String, Map<String, ReplicaInfo>>();
-    infos.forEach(ri -> infoMap.computeIfAbsent(ri.getCollection(), o -> new HashMap<String, ReplicaInfo>()).put(ri.getName(), ri));
+    infos.forEach(
+        ri -> infoMap.putIfAbsent(ri.getCollection(), new HashMap<String, ReplicaInfo>())
+        );
+    infos.forEach(
+        ri -> infoMap.get(ri.getCollection()).put(ri.getName(), ri)
+        );
     source.forEach((coll, shards) -> shards.forEach((shard, replicas) -> replicas.forEach(r -> {
       ReplicaInfo target = infoMap.getOrDefault(coll, Collections.emptyMap()).get(r.getName());
       if (target == null) {
@@ -2305,8 +2315,8 @@ public class SimClusterStateProvider implements ClusterStateProvider {
    * @return copy of the list of replicas on that node, or empty list if none
    */
   public List<ReplicaInfo> simGetReplicaInfos(String node) {
-    final List<ReplicaInfo> replicas = nodeReplicaMap.computeIfAbsent
-      (node, o -> Collections.synchronizedList(new ArrayList<ReplicaInfo>()));
+    nodeReplicaMap.putIfAbsent(node, Collections.synchronizedList(new ArrayList<ReplicaInfo>()));
+    final List<ReplicaInfo> replicas = nodeReplicaMap.get(node);
     // make a defensive copy to avoid ConcurrentModificationException
     return Arrays.asList(replicas.toArray(new ReplicaInfo[replicas.size()]));
   }

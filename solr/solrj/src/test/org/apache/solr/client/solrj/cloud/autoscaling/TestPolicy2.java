@@ -226,7 +226,7 @@ public class TestPolicy2 extends SolrTestCaseJ4 {
           @Override
           public Map<String, Map<String, List<ReplicaInfo>>> getReplicaInfo(String node, Collection<String> keys) {
             Map<String, Map<String, List<ReplicaInfo>>> result = 
-                nodeVsCollectionVsShardVsReplicaInfo.computeIfAbsent(node, o -> new HashMap<String, Map<String, List<ReplicaInfo>>>());
+                nodeVsCollectionVsShardVsReplicaInfo.putIfAbsent(node, new HashMap<String, Map<String, List<ReplicaInfo>>>());
             if (!keys.isEmpty()) {
               Row.forEachReplica(result, replicaInfo -> {
                 for (String key : keys) {
