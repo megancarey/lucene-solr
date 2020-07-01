@@ -16,7 +16,6 @@
  */
 package org.apache.solr.cloud.autoscaling;
 
-import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -24,7 +23,9 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import org.apache.solr.client.solrj.cloud.SolrCloudManager;
 import org.apache.solr.client.solrj.request.CollectionAdminRequest;
@@ -34,19 +35,24 @@ import org.apache.solr.common.cloud.ClusterState;
 import org.apache.solr.common.cloud.DocCollection;
 import org.apache.solr.common.cloud.Replica;
 import org.apache.solr.core.SolrResourceLoader;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * This trigger action evaluates the state of the cluster and determines a set of replica moves
  * that will improve the distribution of replicas throughout the cluster.
  * 
+ * Sample configuration request body:
+ * '{ "set-trigger":
+ *    { "name": "rebalance_trigger", "event": "scheduled", "startTime": "NOW",
+ *      "every": "+1MINUTES", "enabled": true, "actions": 
+ *      [ { "name": "rebalance_plan", "class": "solr.RebalanceReplicasPlanAction", "threshold": "20" }, 
+ *        { "name": "execute_plan", "class": "solr.ExecutePlanAction" } ]
+ *    }
+ *  }'
+ * 
  * The {@link MoveReplica} requests computed are put into the {@link ActionContext}'s properties
  * with the key name "operations", to be executed later by {@link ExecutePlanAction}.
  */
 public class RebalanceReplicasPlanAction extends TriggerActionBase {
-  private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
-
   /*
    * Functions for computing map values
    */
@@ -54,7 +60,6 @@ public class RebalanceReplicasPlanAction extends TriggerActionBase {
       nodeName -> new HashMap<CollectionShardKey,List<Replica>>();
   public static final Function<CollectionShardKey, List<Replica>> REPLICA_LIST_FUNCTION =
       collShardName -> new ArrayList<Replica>();
-  public static final Function<String, Integer> ZERO_FUNCTION = nodeName -> 0;
   
   /** Configuration property for setting percentage difference in replica count across nodes */
   public static final String THRESHOLD_PROP = "threshold";
@@ -63,6 +68,11 @@ public class RebalanceReplicasPlanAction extends TriggerActionBase {
   public static final int DEFAULT_THRESHOLD = 10;
 
   private int diffThreshold;
+  
+  public RebalanceReplicasPlanAction() {
+    super();
+    TriggerUtils.validProperties(validProperties, THRESHOLD_PROP);
+  }
   
   @Override
   public void configure(SolrResourceLoader loader, SolrCloudManager cloudManager, Map<String, Object> properties) throws TriggerValidationException {
@@ -84,15 +94,14 @@ public class RebalanceReplicasPlanAction extends TriggerActionBase {
       context.getProperties().put("operations", new ArrayList<AsyncCollectionAdminRequest>());
     }
     
-    // Get state and list of ops to modify
     @SuppressWarnings({"unchecked"})
     List<AsyncCollectionAdminRequest> operations = (List<AsyncCollectionAdminRequest>) context.getProperties().get("operations");
     SolrCloudManager cloudManager = context.getCloudManager();
     ClusterState state = cloudManager.getClusterStateProvider().getClusterState();
+    Set<String> liveNodes = state.getLiveNodes();
 
-    // Init variables
     int sumReplicas = 0;
-    List<NodeReplicaCount> nodeReplicaCounts = new ArrayList<NodeReplicaCount>(state.getLiveNodes().size());
+    List<NodeReplicaCount> nodeReplicaCounts = new ArrayList<NodeReplicaCount>(liveNodes.size());
     HashMap<String,Map<CollectionShardKey,List<Replica>>> replicasByShardByNodeMap =
         new HashMap<String,Map<CollectionShardKey,List<Replica>>>();
 
@@ -100,20 +109,26 @@ public class RebalanceReplicasPlanAction extends TriggerActionBase {
     Iterator<String> collIter = state.getCollectionsMap().keySet().iterator();
     while (collIter.hasNext()) {
       DocCollection coll = state.getCollection(collIter.next());
-      List<Replica> replicas = coll.getReplicas();
+      Set<String> activeSlices = coll.getActiveSlicesMap().keySet();
       
-      replicas.stream().forEach(replica -> 
-        replicasByShardByNodeMap
-          .computeIfAbsent(replica.getNodeName(), LIST_MAP_FUNCTION)
-            .computeIfAbsent(new CollectionShardKey(replica.collection, replica.slice), REPLICA_LIST_FUNCTION)
-            .add(replica));
+      // Filter out inactive replicas and replicas for inactive shards
+      List<Replica> activeReplicas = coll.getReplicas().stream()
+          .filter(replica -> replica.isActive(liveNodes) && activeSlices.contains(replica.getSlice()))
+          .collect(Collectors.toList());
+      
+      activeReplicas.stream()
+        .forEach(replica -> 
+          replicasByShardByNodeMap
+            .computeIfAbsent(replica.getNodeName(), LIST_MAP_FUNCTION)
+              .computeIfAbsent(new CollectionShardKey(replica.collection, replica.slice), REPLICA_LIST_FUNCTION)
+              .add(replica)
+        );
             
-      // Increment count of all replicas
-      sumReplicas += replicas.size();
+      sumReplicas += activeReplicas.size();
     }
     
     // Create list of NodeReplicaCount objects
-    for (String node : state.getLiveNodes()) {
+    for (String node : liveNodes) {
       int numReplicas = 0;
       if (replicasByShardByNodeMap.containsKey(node)) {
         numReplicas = replicasByShardByNodeMap.get(node).values()
@@ -124,17 +139,15 @@ public class RebalanceReplicasPlanAction extends TriggerActionBase {
       nodeReplicaCounts.add(new NodeReplicaCount(node, numReplicas));
     }
     
-    // Determine which nodes have above average concentration of replicas, and which have below average concentration
     int avgReplicasPerNode = sumReplicas / nodeReplicaCounts.size();
     Collections.sort(nodeReplicaCounts);
-    int numNodes = nodeReplicaCounts.size();
+    int numNodes = liveNodes.size();
     
     for (int i = 0; i < numNodes / 2; i++) {
       // Get least loaded node, toNode, and most loaded node, fromNode
       NodeReplicaCount toNode = nodeReplicaCounts.get(i);
       NodeReplicaCount fromNode = nodeReplicaCounts.get(numNodes - i - 1);
       
-      // Get the replica maps for each node
       Map<CollectionShardKey,List<Replica>> toNodeReplicaMap = replicasByShardByNodeMap.get(toNode.nodeName);
       Map<CollectionShardKey,List<Replica>> fromNodeReplicaMap = replicasByShardByNodeMap.get(fromNode.nodeName);
       
@@ -144,16 +157,16 @@ public class RebalanceReplicasPlanAction extends TriggerActionBase {
         outersection.removeAll(toNodeReplicaMap.keySet());
       }
       
-      // If this underloaded node already has a copy of each replica on the overloaded node, skip
-      if (outersection.size() == 0) {
-        continue;
-      }
+      // Consider nodes balanced when core counts are within <diffThreshold>% of average
+      Iterator<CollectionShardKey> keyIter = outersection.iterator();
+      float overMultiplier = 1 + (1f / diffThreshold);
+      float underMultiplier = 1 - (1f / diffThreshold);
       
       // For each collShard on the overloaded node, move a replica to the underloaded node, until the
-      // nodes have balanced out.
-      Iterator<CollectionShardKey> keyIter = outersection.iterator();
+      // nodes have balanced out
       while (keyIter.hasNext() && 
-          toNode.replicaCount < avgReplicasPerNode && fromNode.replicaCount > avgReplicasPerNode) {
+          toNode.replicaCount < (avgReplicasPerNode * underMultiplier) &&
+          fromNode.replicaCount > (avgReplicasPerNode * overMultiplier)) {
         CollectionShardKey key = keyIter.next();
         List<Replica> replicasToMove = fromNodeReplicaMap.remove(key);
         
@@ -169,6 +182,10 @@ public class RebalanceReplicasPlanAction extends TriggerActionBase {
     }
   }
   
+  /**
+   * A composite key with both collection name and shard name, used as a key in the map of replicas
+   * for each node.
+   */
   private class CollectionShardKey {
     private String collectionName;
     private String shardName;
@@ -194,6 +211,10 @@ public class RebalanceReplicasPlanAction extends TriggerActionBase {
     }
   }
   
+  /**
+   * An object containing both node name and the count of replicas/cores on that node. Used to
+   * determine candidate nodes for replica moves to improve distribution of cores in the cluster.
+   */
   private class NodeReplicaCount implements Comparable<NodeReplicaCount> {
     private String nodeName;
     private int replicaCount;
