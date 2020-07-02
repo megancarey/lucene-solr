@@ -105,11 +105,11 @@ public class RebalanceReplicasPlanActionTest extends SolrCloudTestCase {
       
       // Run rebalancer to compute moves
       rebalancer.process(scheduledEvent, context);
-      triggerFiredLatch.await(10, TimeUnit.SECONDS);
+      triggerFiredLatch.await(5, TimeUnit.SECONDS);
       
       // Execute moves
       executor.process(scheduledEvent, context);
-      executorRanLatch.await(10, TimeUnit.SECONDS);
+      executorRanLatch.await(5, TimeUnit.SECONDS);
       
       // See which nodes have replicas
       ClusterState finalClusterState = cluster.getSolrClient().getZkStateReader().getClusterState();

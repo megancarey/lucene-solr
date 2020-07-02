@@ -23,6 +23,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -69,6 +70,8 @@ public class RebalanceReplicasPlanAction extends TriggerActionBase {
 
   private int diffThreshold;
   
+  private Random shuffleRandom;
+  
   public RebalanceReplicasPlanAction() {
     super();
     TriggerUtils.validProperties(validProperties, THRESHOLD_PROP);
@@ -77,6 +80,7 @@ public class RebalanceReplicasPlanAction extends TriggerActionBase {
   @Override
   public void configure(SolrResourceLoader loader, SolrCloudManager cloudManager, Map<String, Object> properties) throws TriggerValidationException {
     super.configure(loader, cloudManager, properties);
+    shuffleRandom = new Random();
     String thresholdStr = String.valueOf(properties.getOrDefault(THRESHOLD_PROP, String.valueOf(DEFAULT_THRESHOLD)));
     try {
       diffThreshold = Integer.parseInt(thresholdStr);
@@ -171,7 +175,7 @@ public class RebalanceReplicasPlanAction extends TriggerActionBase {
         List<Replica> replicasToMove = fromNodeReplicaMap.remove(key);
         
         if (replicasToMove != null && replicasToMove.size() > 0) {
-          Collections.shuffle(replicasToMove);
+          Collections.shuffle(replicasToMove, shuffleRandom);
           Replica replica = replicasToMove.get(0);
           operations.add(
               CollectionAdminRequest.moveReplica(replica.collection, replica.getName(), toNode.nodeName));
